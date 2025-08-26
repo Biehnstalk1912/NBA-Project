@@ -1,0 +1,211 @@
+---
+title: "NBA Project"
+author: Brady Biehn
+output: pdf_document
+---
+
+```{r results = 'hide', echo = TRUE, warning = FALSE, message = FALSE}
+# Reading in the three datasets and loading necessary packages
+library(tidyverse)
+library(mosaic)
+library(ggfortify)
+library(car)
+library(GGally)
+teamDefenseStats <- read_csv("team_stats_defense_rs.csv")
+teamAdvancedStats <- read_csv("team_stats_advanced_rs.csv")
+teamTraditionalStats <- read_csv("team_stats_traditional_rs.csv")
+```
+
+```{r include = TRUE}
+# The data were joined together by both team ID and season, then the particular variables of interest that were listed above were selected.
+fullJoinedData <- teamDefenseStats %>%
+  # Selecting to certain entries to protect against duplicates within the final dataset
+  select(c(1:15, 17:19, 21, 24, 26, 27, 55)) %>%
+  left_join(
+    teamAdvancedStats %>%
+      select(-c(2:7, 12, 16:18, 21:45)),
+    # joining by team_id and season
+        by = c("TEAM_ID", "SEASON")) %>%
+  select(1, SEASON, everything()) %>%
+  # ordering by team name
+  arrange(TEAM_NAME)
+fullJoinedData <- fullJoinedData %>%
+  # Selecting to certain entries to protect against duplicates within the final  dataset
+  left_join(
+    teamTraditionalStats %>%
+      select(-c(2:7,28:54)), 
+    # joining team_id and season
+        by = c("TEAM_ID", "SEASON"))
+filteredJoinedData <- fullJoinedData %>%
+  # creating a two-point field goal attempts column, 
+  # field goals normally encompass both three-pointers and two-pointers
+  # therefore the three point attempts are removed to only include the two-point attemps
+  mutate(FG2A = (FGA - FG3A)) %>%
+  mutate(OPP_FG2A = (OPP_FGA - OPP_FG3A)) %>%
+  # Converting win percentage to be an actual percentage instead of a proportion
+  mutate(W_PCT = W_PCT * 100) %>%
+  # Selecting the dataset to only include variables of interest listed above
+  select(-c(1, 4:6, 8:9, 11:12, 14:15, 17:22, 24:26, 28:37, 39:40, 42:52)) %>%
+  # Organizing columns to group identifier, offense, and defensive columns together
+  select(c(1:2, 10:12, 8:9, 7, 6, 12, 4:5, 13)) %>%
+  # filtering the dataset to only include data from the three seasons of interest
+  filter(SEASON == "2003-04" | SEASON == "2017-18" | SEASON == "2022-23")
+# Showing the structure of the dataset
+glimpse(filteredJoinedData)
+```
+
+```{r include = TRUE}
+# Deriving the summary statistics of FG3A by season
+favstats(FG3A ~ SEASON, data = filteredJoinedData)
+```
+
+```{r echo = FALSE}
+# Creating side-by-side boxplots of the 
+# number of three-point shot attempted 
+# By the NBA season
+filteredJoinedData %>%
+  ggplot(aes(x = SEASON, y = FG3A)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(x = "NBA Season", 
+       y = "Three Pointers Attempted") 
+
+```
+  
+
+```{r include = TRUE}
+# Showing all teams that shot over 40 three per game
+filteredJoinedData %>%
+  filter(FG3A > 40)
+```
+
+```{r include = TRUE}
+# Deriving the summary statistics of defensive rating by season
+favstats(DEF_RATING ~ SEASON, data = filteredJoinedData)
+```
+```{r echo = FALSE}
+# Creating side-by-side boxplots of the defensive rating by season
+filteredJoinedData %>%
+  ggplot(aes(x = SEASON, y = DEF_RATING)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(x = "NBA Season", 
+       y = "Defensive Rating")
+```
+```{r include = TRUE}
+# finding the outliers for the 2003-04 season
+filteredJoinedData %>%
+  filter(SEASON == "2003-04") %>%
+  filter(DEF_RATING < 95 | DEF_RATING > 108)
+```
+```{r include = TRUE}
+# Seeing if anyone matches with 2003-04 Orlando Magic in the present game
+filteredJoinedData %>%
+  filter(SEASON == "2022-23") %>%
+  filter(DEF_RATING <= 108.8)
+```
+
+```{r include = TRUE}
+pointsScoredModel <- lm(PTS ~ FG3A + FG2A + FTA, data = filteredJoinedData)
+summary(pointsScoredModel)
+```
+```{r}
+# Conducting partial F-tests test the significance of each 
+# of the explanatory variables in predicting points
+pointsScoredReducedFree <-  lm(PTS ~ FG3A + FG2A, data = filteredJoinedData)
+anova(pointsScoredReducedFree, pointsScoredModel)
+pointsScoredReducedThree <- lm(PTS ~  FG2A + FTA, data = filteredJoinedData)
+anova(pointsScoredReducedThree, pointsScoredModel)
+pointsScoredReducedTwo <- lm(PTS ~ FG3A + FTA, data = filteredJoinedData)
+anova(pointsScoredReducedTwo, pointsScoredModel)
+```
+
+
+```{r include = TRUE}
+# Creating a 95% confidence interval for all of the variables in
+# each of the variables in the model to gauge range of the values
+confint(pointsScoredModel)
+```
+
+
+```{r include = TRUE}
+# SHOWING THE CONCERN OF MULTICOLINEARITY
+# Creating the model with the three-pointers and two-pointers separate 
+defenseModel <- lm(DEF_RATING ~ OPP_FG3A + OPP_FG2A + OPP_FTA + SEASON + SEASON * OPP_FG3A + SEASON * OPP_FG2A + SEASON * OPP_FTA, data = filteredJoinedData)
+# Calculating the VIFs
+vif(defenseModel, type = 'predictor')
+summary(defenseModel)
+```
+```{r include = TRUE}
+# Creating the model with the opponent's field goal attempted variable
+defenseModel <- lm(DEF_RATING ~ OPP_FG3A + OPP_FG2A + OPP_FTA + SEASON 
+                   + SEASON * OPP_FG2A + OPP_FTA * SEASON,
+                   data = filteredJoinedData)
+# Calculating the VIFs
+vif(defenseModel)
+# The VIF OPP_FGA < 10 means that multicolinearity is fine and not a concern :)
+```
+
+```{r include = TRUE}
+# Largest model all main effects and interaction terms
+defenseModel <- lm(DEF_RATING ~ OPP_FG3A + OPP_FG2A + OPP_FTA + SEASON 
+                   + SEASON * OPP_FG2A + OPP_FTA * SEASON + OPP_FG3A * SEASON,
+                   data = filteredJoinedData)
+# Reduced model of all main effect and interaction terms except for the season and opposing teams three-point attempts interaction term
+defenseRecudedModelThree <- lm(DEF_RATING ~ OPP_FG3A + OPP_FG2A + OPP_FTA + SEASON 
+                   + SEASON * OPP_FG2A + OPP_FTA * SEASON,
+                   data = filteredJoinedData)
+# Reduced model all main effects and interaction terms except the season and opposing teams free-throw attempts interaction term
+defenseReducedTwoModel <- lm(DEF_RATING ~ OPP_FG3A + OPP_FG2A + OPP_FTA + SEASON 
+                    + OPP_FTA * SEASON + OPP_FG3A * SEASON,
+                   data = filteredJoinedData)
+
+# Conducting a partial F-test to see the necessity of the season and opposing teams free-throw attempts interaction term
+defenseReducedFreeThrowModel <- lm(DEF_RATING ~ OPP_FG3A + OPP_FG2A + OPP_FTA + SEASON 
+                   + SEASON * OPP_FG2A + OPP_FG3A * SEASON,
+                   data = filteredJoinedData)
+# Conducting anova tests to measure
+anova(defenseRecudedModelThree, defenseModel)
+anova(defenseReducedTwoModel, defenseModel)
+anova(defenseReducedFreeThrowModel, defenseModel)
+```
+
+
+```{r include = TRUE} 
+# Renaming final model for a less complex name
+finalDefensiveModel <- 
+  lm(DEF_RATING ~ OPP_FG3A + OPP_FG2A + OPP_FTA + SEASON 
+    + SEASON * OPP_FG3A + SEASON * OPP_FG2A, data = filteredJoinedData)
+summary(finalDefensiveModel)
+```
+
+
+```{r include = TRUE}
+confint(finalDefensiveModel)
+```
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+# Creating the diagnostic plots 
+autoplot(pointsScoredModel) +
+  theme_bw()
+```
+
+```{r include = TRUE}
+# Calculating VIF to test for multicolinearity 
+vif(pointsScoredModel)
+```
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+# Creating the diagnostic plots for the defensive model
+autoplot(finalDefensiveModel) +
+  theme_bw()
+```
+
+```{r include = TRUE}
+# Calculating GVIF to test for multicolinearity 
+vif(finalDefensiveModel, type = "predictor")
+```
+
+
+
+
+
